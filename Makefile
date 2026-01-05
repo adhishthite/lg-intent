@@ -1,4 +1,4 @@
-.PHONY: install format lint check test clean run
+.PHONY: install format lint check test clean run graph-ascii graph-mermaid
 
 install:
 	uv sync
@@ -12,7 +12,7 @@ lint:
 check: format lint
 
 test:
-	uv run python -c "from email_agent import create_email_agent; print('Import successful')"
+	uv run pytest -v
 
 clean:
 	rm -rf __pycache__ .ruff_cache .pytest_cache .mypy_cache
@@ -22,4 +22,10 @@ clean:
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 
 run:
-	uv run python run_agent.py
+	uv run python src/main.py
+
+graph-ascii:
+	PYTHONPATH=src uv run python -c "from enterprise_rag.graph import print_graph_ascii; print_graph_ascii()"
+
+graph-mermaid:
+	PYTHONPATH=src uv run python -c "from enterprise_rag.graph import print_graph_mermaid; print_graph_mermaid()"

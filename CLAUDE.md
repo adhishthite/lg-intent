@@ -1,130 +1,65 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+High-level guidance for Claude Code. See subdirectory CLAUDE.md files for implementation details.
+
+## Documentation Structure
+
+This repo uses **hierarchical CLAUDE.md files**:
+
+- @CLAUDE.md - This file (high-level)
+- @src/enterprise_rag/CLAUDE.md - Package details (state, config, graph)
+- @src/enterprise_rag/nodes/CLAUDE.md - Node implementations
+- @src/enterprise_rag/agents/CLAUDE.md - Agent implementations
+
+**Important**: After making code changes, spin up a subagent to update the relevant CLAUDE.md files. If a subdirectory does not have a CLAUDE.md, create one for that directory. Keep documentation in sync with implementation.
 
 ## Project Overview
 
-LangGraph email agent implementation following the "Thinking in LangGraph" tutorial. Demonstrates state-based workflow design, Command-based routing, and human-in-the-loop with interrupt().
+Enterprise RAG system with intent-based routing. Classifies user queries and routes to specialized retrieval agents.
 
-## Commands
+## Quick Reference
 
 ```bash
-make install   # Install dependencies (uv sync)
-make check     # Format + lint (auto-fix)
-make run       # Run the email agent demo
-make test      # Verify imports work
-make clean     # Remove caches, .DS_Store, *.pyc (preserves .venv)
+make install       # Install dependencies
+make check         # Format + lint
+make test          # Run tests (8 tests)
+make run           # Run demo
+make graph-ascii   # Print graph
 ```
 
 ## Architecture
 
-### Core Pattern: State -> Nodes -> Commands
-
-**ASCII Graph** (generate with `agent.get_graph().draw_ascii()`):
-
 ```bash
-                                +-----------+
-                                | __start__ |
-                                +-----------+
-                                       *
-                                       *
-                                       *
-                                +------------+
-                                | read_email |
-                                +------------+
-                                       *
-                                       *
-                                       *
-                              +-----------------+
-                              | classify_intent |
-                           ...+-----------------+...
-                     ......            .            ......
-                .....                  .                  .....
-             ...                       .                       .....
-+--------------+           +----------------------+                 ...
-| bug_tracking |           | search_documentation |            .....
-+--------------+.....      +----------------------+       .....
-                     ......            .            ......
-                           .....       .       .....
-                                ...    .    ...
-                              +----------------+
-                              | draft_response |
-                              +----------------+
-                                ..           ..
-                              ..               ..
-                            ..                   ..
-                  +--------------+                 ..
-                  | human_review |               ..
-                  +--------------+             ..
-                                ..           ..
-                                  ..       ..
-                                    ..   ..
-                                +------------+
-                                | send_reply |
-                                +------------+
-                                       *
-                                       *
-                                       *
-                                  +---------+
-                                  | __end__ |
-                                  +---------+
+User Query → classify_intent → [agent] → draft_response → Response
+                    ↓
+         ┌─────────┼─────────┐
+         ↓         ↓         ↓
+   internal    elastic     jira
+     docs       docs
 ```
 
-**Mermaid Diagram** (generate with `agent.get_graph().draw_mermaid()`):
+**Three intent categories**:
 
-```mermaid
-graph TD;
-    __start__([__start__]):::first
-    read_email(read_email)
-    classify_intent(classify_intent)
-    search_documentation(search_documentation)
-    bug_tracking(bug_tracking)
-    draft_response(draft_response)
-    human_review(human_review)
-    send_reply(send_reply)
-    __end__([__end__]):::last
-    __start__ --> read_email;
-    read_email --> classify_intent;
-    classify_intent -.-> bug_tracking;
-    classify_intent -.-> draft_response;
-    classify_intent -.-> search_documentation;
-    bug_tracking -.-> draft_response;
-    search_documentation -.-> draft_response;
-    draft_response -.-> human_review;
-    draft_response -.-> send_reply;
-    human_review -.-> send_reply;
-    send_reply --> __end__;
-    classDef first fill-opacity:0
-    classDef last fill:#bfb6fc
-```
+- `internal_docs` - Wiki + ServiceNow
+- `elastic_docs` - Elasticsearch documentation
+- `jira` - Issue tracker
 
-**Edge types**: Solid (`-->`) = explicit edges via `add_edge()`. Dashed (`-.->`) = conditional edges inferred from `Command` routing
+## Key Files
 
-**State** (`EmailAgentState`): TypedDict that flows between nodes. Stores raw data, not formatted prompts.
+| File                                        | Purpose                  |
+| ------------------------------------------- | ------------------------ |
+| @src/enterprise_rag/state.py                | State schemas            |
+| @src/enterprise_rag/graph.py                | LangGraph wiring         |
+| @src/enterprise_rag/nodes/classifier.py     | Intent classification    |
+| @src/enterprise_rag/nodes/response.py       | Response generation      |
+| @src/enterprise_rag/agents/internal_docs.py | Internal docs agent      |
+| @src/enterprise_rag/agents/elastic_docs.py  | Elasticsearch docs agent |
+| @src/enterprise_rag/agents/jira.py          | Jira agent               |
 
-**Nodes**: Functions that take state, do work, return updates. Two return types:
+## Environment
 
-- `dict`: Simple state update, routing follows explicit edges
-- `Command`: State update + routing decision bundled together
+Requires `OPENAI_API_KEY` in `.env`.
 
-**Command-based routing**: Nodes decide where to go next via `Command(update={...}, goto="node_name")`. Only 3 explicit edges defined; all conditional routing lives in nodes.
+## Extending
 
-### Key Files
-
-- `email_agent.py`: State schema, node functions, graph wiring
-- `run_agent.py`: Demo script showing invoke, stream, and interrupt handling
-
-### Human-in-the-Loop Pattern
-
-1. Node calls `interrupt(payload)` - execution pauses, state saved
-2. Caller checks `agent.get_state(config).next` for pending nodes
-3. Access payload via `state.tasks[n].interrupts[m].value`
-4. Resume with `agent.stream(Command(resume={...}), config)`
-
-### Environment
-
-Requires `OPENAI_API_KEY` in `.env` file.
-
-### Default Model
-
-The default model is `gpt-5-nano`.
+To add a new data source, see @src/enterprise_rag/agents/CLAUDE.md for the agent contract and production implementation patterns.
