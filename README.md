@@ -103,14 +103,49 @@ src/
 
 ## Configuration
 
-Environment variables:
+Create a `.env` file with the following variables:
+
+### Required
+
+| Variable               | Description              |
+| ---------------------- | ------------------------ |
+| `OPENAI_API_KEY`       | OpenAI API key           |
+
+### LLM Settings
 
 | Variable               | Description              | Default      |
 | ---------------------- | ------------------------ | ------------ |
-| `OPENAI_API_KEY`       | OpenAI API key           | Required     |
 | `CLASSIFIER_MODEL`     | Model for classification | gpt-4.1-nano |
 | `RESPONSE_MODEL`       | Model for response       | gpt-4.1-nano |
-| `MAX_CHUNKS_PER_AGENT` | Max chunks per retrieval | 5            |
+
+### Elasticsearch (for production retrieval)
+
+| Variable               | Description                |
+| ---------------------- | -------------------------- |
+| `ELASTICSEARCH_URL`    | Elasticsearch cluster URL  |
+| `ELASTICSEARCH_API_KEY`| API key for authentication |
+| `WIKI_ES_VECTOR_INDEX` | Wiki embeddings index      |
+| `SNOW_ES_VECTOR_INDEX` | ServiceNow embeddings index|
+| `JIRA_ES_VECTOR_INDEX` | Jira embeddings index      |
+| `DOCS_ES_VECTOR_INDEX` | ES docs embeddings index   |
+| `ES_K`                 | Results per search (default: 5) |
+
+### Azure OpenAI (optional)
+
+| Variable                  | Description              |
+| ------------------------- | ------------------------ |
+| `AZURE_OPENAI_ENDPOINT`   | Azure OpenAI service URL |
+| `AZURE_OPENAI_API_KEY`    | Azure OpenAI API key     |
+
+### LangSmith (observability)
+
+| Variable             | Description              |
+| -------------------- | ------------------------ |
+| `LANGSMITH_TRACING`  | Enable tracing (true/false) |
+| `LANGSMITH_API_KEY`  | LangSmith API key        |
+| `LANGSMITH_PROJECT`  | Project name for tracing |
+
+See `src/enterprise_rag/CLAUDE.md` for full configuration reference.
 
 ## Extending
 

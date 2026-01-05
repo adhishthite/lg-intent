@@ -58,11 +58,40 @@ Using `Literal` instead of `Enum` for better LLM structured output compatibility
 
 ## Configuration
 
-Environment variables loaded in @src/enterprise_rag/config.py via `python-dotenv`:
+Configuration uses `pydantic-settings` with nested `BaseSettings` groups in @src/enterprise_rag/config.py.
 
-| Variable                 | Default      | Used By                                 |
-| ------------------------ | ------------ | --------------------------------------- |
-| `CLASSIFIER_MODEL`       | gpt-4.1-nano | @src/enterprise_rag/nodes/classifier.py |
-| `RESPONSE_MODEL`         | gpt-4.1-nano | @src/enterprise_rag/nodes/response.py   |
-| `CLASSIFIER_TEMPERATURE` | 0.0          | @src/enterprise_rag/nodes/classifier.py |
-| `RESPONSE_TEMPERATURE`   | 0.3          | @src/enterprise_rag/nodes/response.py   |
+### Usage Pattern
+
+```python
+from enterprise_rag.config import settings
+
+# Top-level
+settings.OPENAI_API_KEY
+
+# Nested access
+settings.llm.CLASSIFIER_MODEL              # "gpt-4.1-nano"
+settings.elasticsearch.ELASTICSEARCH_URL   # ES cluster URL
+settings.elasticsearch.WIKI_ES_VECTOR_INDEX
+settings.langsmith.PROJECT
+settings.azure.OPENAI_ENDPOINT
+```
+
+### Key Design Decisions
+
+1. **`load_dotenv()` first** - Sets env vars for external SDKs (OpenAI, LangChain)
+2. **Nested `BaseSettings`** - Each group has its own `env_prefix` for automatic env var mapping
+3. **No duplication** - Config lives only in nested groups, not duplicated at top level
+
+### Nested Config Groups
+
+| Group           | Env Prefix     | Example Access                          |
+| --------------- | -------------- | --------------------------------------- |
+| `llm`           | -              | `settings.llm.CLASSIFIER_MODEL`         |
+| `elasticsearch` | -              | `settings.elasticsearch.ELASTICSEARCH_URL` |
+| `azure`         | `AZURE_`       | `settings.azure.OPENAI_ENDPOINT`        |
+| `langsmith`     | `LANGSMITH_`   | `settings.langsmith.PROJECT`            |
+| `postgres`      | `POSTGRES_`    | `settings.postgres.DB_URI`              |
+| `eval`          | `EVAL_`        | `settings.eval.AGENT_MODEL`             |
+| `retrieval`     | -              | `settings.retrieval.MAX_CHUNKS_PER_AGENT` |
+
+See @src/enterprise_rag/config.py for all available settings.

@@ -7,13 +7,13 @@ Synthesizes a response from retrieved chunks and generates source citations.
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from enterprise_rag.config import RESPONSE_MODEL, RESPONSE_TEMPERATURE
+from enterprise_rag.config import settings
 from enterprise_rag.state import RAGState, Source
 
 # Initialize the response LLM
 _response_llm = ChatOpenAI(
-    model=RESPONSE_MODEL,
-    temperature=RESPONSE_TEMPERATURE,
+    model=settings.llm.RESPONSE_MODEL,
+    temperature=settings.llm.RESPONSE_TEMPERATURE,
 )
 
 

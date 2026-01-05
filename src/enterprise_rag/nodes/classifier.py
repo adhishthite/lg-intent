@@ -10,13 +10,13 @@ from typing import Literal
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from enterprise_rag.config import CLASSIFIER_MODEL, CLASSIFIER_TEMPERATURE
+from enterprise_rag.config import settings
 from enterprise_rag.state import IntentClassification, RAGState
 
 # Initialize the classifier LLM
 _classifier_llm = ChatOpenAI(
-    model=CLASSIFIER_MODEL,
-    temperature=CLASSIFIER_TEMPERATURE,
+    model=settings.llm.CLASSIFIER_MODEL,
+    temperature=settings.llm.CLASSIFIER_TEMPERATURE,
 )
 
 

@@ -1,48 +1,147 @@
 """
 Configuration for Enterprise RAG system.
 
-Uses environment variables for configuration, with sensible defaults.
+Uses pydantic-settings with nested configuration groups.
 """
 
-import os
-
 from dotenv import load_dotenv
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load .env file if present
+# Load .env file FIRST - sets env vars for external SDKs (OpenAI, etc.)
 load_dotenv()
 
 
 # =============================================================================
-# LLM Configuration
+# Nested Configuration Groups
 # =============================================================================
 
-# Model for intent classification (fast, cheap)
-CLASSIFIER_MODEL = os.getenv("CLASSIFIER_MODEL", "gpt-5-nano")
 
-# Model for response generation (more capable)
-RESPONSE_MODEL = os.getenv("RESPONSE_MODEL", "gpt-5-nano")
+class LangSmithConfig(BaseSettings):
+    """LangSmith observability settings."""
 
-# Temperature for classification (deterministic)
-CLASSIFIER_TEMPERATURE = 0.0
+    model_config = SettingsConfigDict(env_prefix="LANGSMITH_", extra="ignore")
 
-# Temperature for response generation (slight creativity)
-RESPONSE_TEMPERATURE = 0.3
+    TRACING: str = "false"
+    ENDPOINT: str = "https://api.smith.langchain.com"
+    API_KEY: str = ""
+    PROJECT: str = ""
+
+
+class AzureOpenAIConfig(BaseSettings):
+    """Azure OpenAI settings."""
+
+    model_config = SettingsConfigDict(env_prefix="AZURE_", extra="ignore")
+
+    OPENAI_ENDPOINT: str = ""
+    OPENAI_API_KEY: str = ""
+    EMBEDDING_DEPLOYMENT_NAME: str = ""
+    EMBEDDING_API_VERSION: str = "2024-02-01"
+    OPENAI_API_VERSION: str = "2025-03-01-preview"
+
+
+class PostgresConfig(BaseSettings):
+    """PostgreSQL settings."""
+
+    model_config = SettingsConfigDict(env_prefix="POSTGRES_", extra="ignore")
+
+    DB_URI: str = ""
+    DB_URI_POOLER: str = ""
+    HOSTNAME: str = ""
+
+
+class ElasticsearchConfig(BaseSettings):
+    """Elasticsearch settings."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    ELASTICSEARCH_URL: str = Field(default="", alias="ELASTICSEARCH_URL")
+    ELASTICSEARCH_API_KEY: str = Field(default="", alias="ELASTICSEARCH_API_KEY")
+
+    # Vector indices
+    WIKI_ES_VECTOR_INDEX: str = "elasticgpt-embeddings-wiki"
+    SNOW_ES_VECTOR_INDEX: str = "test-bq-embeddings-openai"
+    JIRA_ES_VECTOR_INDEX: str = "elasticgpt-jira-embeddings-dev"
+    DOCS_ES_VECTOR_INDEX: str = "elasticgpt-embeddings-docs"
+
+    # Retrieval parameters
+    ES_K: int = 5
+    ES_RANK_CONSTANT: int = 20
+
+
+class LLMConfig(BaseSettings):
+    """LLM model settings."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    CLASSIFIER_MODEL: str = "gpt-4.1-nano"
+    CLASSIFIER_TEMPERATURE: float = 0.0
+    RESPONSE_MODEL: str = "gpt-4.1-nano"
+    RESPONSE_TEMPERATURE: float = 0.3
+
+
+class EvalConfig(BaseSettings):
+    """Evaluation settings."""
+
+    model_config = SettingsConfigDict(env_prefix="EVAL_", extra="ignore")
+
+    AGENT_MODEL: str = "gpt-4.1-mini"
+    JUDGE_MODEL: str = "gemini-3-flash-preview"
+
+
+class RetrievalConfig(BaseSettings):
+    """Retrieval settings."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    MAX_CHUNKS_PER_AGENT: int = 5
+    MIN_RELEVANCE_SCORE: float = 0.5
 
 
 # =============================================================================
-# Retrieval Configuration
+# Main Settings Class
 # =============================================================================
 
-# Maximum chunks to retrieve per agent
-MAX_CHUNKS_PER_AGENT = int(os.getenv("MAX_CHUNKS_PER_AGENT", "5"))
 
-# Minimum relevance score to include a chunk
-MIN_RELEVANCE_SCORE = float(os.getenv("MIN_RELEVANCE_SCORE", "0.5"))
+class Settings(BaseSettings):
+    """
+    Application settings with nested configuration groups.
+
+    Usage:
+        from enterprise_rag.config import settings
+
+        settings.OPENAI_API_KEY           # Top-level
+        settings.elasticsearch.ELASTICSEARCH_URL
+        settings.llm.CLASSIFIER_MODEL
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # =========================================================================
+    # Top-level API Keys
+    # =========================================================================
+
+    OPENAI_API_KEY: str
+    GOOGLE_API_KEY: str = ""
+    OPENAI_API_VERSION: str = "2025-03-01-preview"
+    DEBUG: bool = False
+
+    # =========================================================================
+    # Nested config groups
+    # =========================================================================
+
+    langsmith: LangSmithConfig = Field(default_factory=LangSmithConfig)
+    azure: AzureOpenAIConfig = Field(default_factory=AzureOpenAIConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
+    elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    eval: EvalConfig = Field(default_factory=EvalConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
 
 
-# =============================================================================
-# Feature Flags
-# =============================================================================
-
-# Enable debug logging
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+# Global settings instance
+settings = Settings()
