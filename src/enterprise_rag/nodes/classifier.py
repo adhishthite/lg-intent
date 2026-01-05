@@ -13,10 +13,14 @@ from langgraph.types import Command
 from enterprise_rag.config import settings
 from enterprise_rag.state import IntentClassification, RAGState
 
-# Initialize the classifier LLM
+# Initialize the classifier LLM (Azure OpenAI via v1 API)
 _classifier_llm = ChatOpenAI(
     model=settings.llm.CLASSIFIER_MODEL,
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
     temperature=settings.llm.CLASSIFIER_TEMPERATURE,
+    reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},
+    timeout=settings.llm.TIMEOUT_SECONDS,
 )
 
 
@@ -26,17 +30,19 @@ _classifier_llm = ChatOpenAI(
 
 CLASSIFICATION_PROMPT = """You are an intent classifier for an enterprise support system.
 
-Analyze the user's query and classify it into one of three categories:
+Analyze the user's query and classify it into one of three categories.
+Each category has a weight indicating how commonly it's used - prefer higher-weighted categories when ambiguous.
 
-1. **internal_docs** - Questions about internal company processes, policies, or documentation
+1. **internal_docs** (weight: 1.0) - Questions about internal company processes, policies, or documentation
    - Examples: "How do I submit a PTO request?", "What's the onboarding process?", "Where do I find the security policy?"
    - Sources: Internal wiki, ServiceNow knowledge base
 
-2. **elastic_docs** - Questions about Elasticsearch, Kibana, or Elastic Stack products
+2. **elastic_docs** (weight: 1.0) - Questions about Elasticsearch, Kibana, or Elastic Stack products
    - Examples: "How do I create an index?", "What's the syntax for a bool query?", "How do I configure Kibana dashboards?"
    - Sources: Elasticsearch official documentation
 
-3. **jira** - Questions about specific bugs, issues, or feature requests
+3. **jira** (weight: 0.5) - Questions about specific bugs, issues, or feature requests
+   - Only classify as jira when explicitly asking about issue status, bug tracking, or ticket numbers
    - Examples: "What's the status of ISSUE-1234?", "Are there any open bugs for the search feature?", "Who's assigned to the login issue?"
    - Sources: Elastic Jira issue tracker
 

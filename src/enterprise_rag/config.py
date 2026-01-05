@@ -74,10 +74,13 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    CLASSIFIER_MODEL: str = "gpt-4.1-nano"
+    CLASSIFIER_MODEL: str = "gpt-5-nano"
     CLASSIFIER_TEMPERATURE: float = 0.0
-    RESPONSE_MODEL: str = "gpt-4.1-nano"
+    CLASSIFIER_REASONING_EFFORT: str = "low"
+    RESPONSE_MODEL: str = "gpt-5-nano"
     RESPONSE_TEMPERATURE: float = 0.3
+    RESPONSE_REASONING_EFFORT: str = "medium"
+    TIMEOUT_SECONDS: int = 90
 
 
 class EvalConfig(BaseSettings):
@@ -110,9 +113,10 @@ class Settings(BaseSettings):
     Usage:
         from enterprise_rag.config import settings
 
-        settings.OPENAI_API_KEY           # Top-level
+        settings.azure.OPENAI_API_KEY     # Azure OpenAI
+        settings.azure.OPENAI_ENDPOINT    # Azure endpoint
+        settings.llm.CLASSIFIER_MODEL     # Model settings
         settings.elasticsearch.ELASTICSEARCH_URL
-        settings.llm.CLASSIFIER_MODEL
     """
 
     model_config = SettingsConfigDict(
@@ -122,12 +126,10 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # Top-level API Keys
+    # Top-level Settings
     # =========================================================================
 
-    OPENAI_API_KEY: str
     GOOGLE_API_KEY: str = ""
-    OPENAI_API_VERSION: str = "2025-03-01-preview"
     DEBUG: bool = False
 
     # =========================================================================

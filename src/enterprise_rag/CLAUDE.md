@@ -65,15 +65,17 @@ Configuration uses `pydantic-settings` with nested `BaseSettings` groups in @src
 ```python
 from enterprise_rag.config import settings
 
-# Top-level
-settings.OPENAI_API_KEY
+# Azure OpenAI (required)
+settings.azure.OPENAI_ENDPOINT             # Azure service URL
+settings.azure.OPENAI_API_KEY              # Azure API key
 
-# Nested access
-settings.llm.CLASSIFIER_MODEL              # "gpt-4.1-nano"
-settings.elasticsearch.ELASTICSEARCH_URL   # ES cluster URL
-settings.elasticsearch.WIKI_ES_VECTOR_INDEX
+# LLM settings
+settings.llm.CLASSIFIER_MODEL              # "gpt-5-nano"
+settings.llm.CLASSIFIER_REASONING_EFFORT   # "low"
+
+# Other nested access
+settings.elasticsearch.ELASTICSEARCH_URL
 settings.langsmith.PROJECT
-settings.azure.OPENAI_ENDPOINT
 ```
 
 ### Key Design Decisions
@@ -84,14 +86,42 @@ settings.azure.OPENAI_ENDPOINT
 
 ### Nested Config Groups
 
-| Group           | Env Prefix     | Example Access                          |
-| --------------- | -------------- | --------------------------------------- |
-| `llm`           | -              | `settings.llm.CLASSIFIER_MODEL`         |
-| `elasticsearch` | -              | `settings.elasticsearch.ELASTICSEARCH_URL` |
-| `azure`         | `AZURE_`       | `settings.azure.OPENAI_ENDPOINT`        |
-| `langsmith`     | `LANGSMITH_`   | `settings.langsmith.PROJECT`            |
-| `postgres`      | `POSTGRES_`    | `settings.postgres.DB_URI`              |
-| `eval`          | `EVAL_`        | `settings.eval.AGENT_MODEL`             |
-| `retrieval`     | -              | `settings.retrieval.MAX_CHUNKS_PER_AGENT` |
+| Group           | Env Prefix   | Example Access                             |
+| --------------- | ------------ | ------------------------------------------ |
+| `llm`           | -            | `settings.llm.CLASSIFIER_MODEL`            |
+| `elasticsearch` | -            | `settings.elasticsearch.ELASTICSEARCH_URL` |
+| `azure`         | `AZURE_`     | `settings.azure.OPENAI_ENDPOINT`           |
+| `langsmith`     | `LANGSMITH_` | `settings.langsmith.PROJECT`               |
+| `postgres`      | `POSTGRES_`  | `settings.postgres.DB_URI`                 |
+| `eval`          | `EVAL_`      | `settings.eval.AGENT_MODEL`                |
+| `retrieval`     | -            | `settings.retrieval.MAX_CHUNKS_PER_AGENT`  |
+
+### LLM Settings
+
+| Setting                       | Default      | Description                       |
+| ----------------------------- | ------------ | --------------------------------- |
+| `CLASSIFIER_MODEL`            | `gpt-5-nano` | Model for intent classification   |
+| `CLASSIFIER_REASONING_EFFORT` | `low`        | Reasoning effort for classifier   |
+| `RESPONSE_MODEL`              | `gpt-5-nano` | Model for response generation     |
+| `RESPONSE_REASONING_EFFORT`   | `medium`     | Reasoning effort for responses    |
+| `TIMEOUT_SECONDS`             | `90`         | Request timeout for all LLM calls |
 
 See @src/enterprise_rag/config.py for all available settings.
+
+## Azure OpenAI Integration
+
+LLMs use Azure OpenAI via the v1 API pattern:
+
+```python
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model=settings.llm.CLASSIFIER_MODEL,
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
+    reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},
+    timeout=settings.llm.TIMEOUT_SECONDS,
+)
+```
+
+**Key pattern**: Appending `/openai/v1/` to Azure endpoint enables full `ChatOpenAI` compatibility, including reasoning models.

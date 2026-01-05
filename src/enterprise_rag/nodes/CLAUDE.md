@@ -12,6 +12,32 @@ See @src/enterprise_rag/nodes/classifier.py
 
 Classifies user queries into intent categories using structured LLM output.
 
+### LLM Configuration
+
+Uses Azure OpenAI via v1 API with reasoning:
+
+```python
+_classifier_llm = ChatOpenAI(
+    model=settings.llm.CLASSIFIER_MODEL,  # gpt-5-nano
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
+    reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},  # "low"
+    timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
+)
+```
+
+### Intent Weights
+
+Categories have weights to bias classification when ambiguous:
+
+| Intent          | Weight | Description                                    |
+| --------------- | ------ | ---------------------------------------------- |
+| `internal_docs` | 1.0    | Default preference                             |
+| `elastic_docs`  | 1.0    | Default preference                             |
+| `jira`          | 0.5    | Only when explicitly asking about tickets/bugs |
+
+Jira has lower weight because users rarely check issue status via this system.
+
 ### Key Pattern: Structured Output
 
 ```python
@@ -61,6 +87,33 @@ See @src/enterprise_rag/nodes/response.py
 ### Purpose
 
 Generates final response from retrieved chunks with source citations.
+
+### LLM Configuration
+
+Uses Azure OpenAI via v1 API with reasoning:
+
+```python
+_response_llm = ChatOpenAI(
+    model=settings.llm.RESPONSE_MODEL,  # gpt-5-nano
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
+    reasoning={"effort": settings.llm.RESPONSE_REASONING_EFFORT},  # "medium"
+    timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
+)
+```
+
+### Reasoning Model Content Handling
+
+Reasoning models return `content` as a list of blocks instead of a string:
+
+```python
+content = response.content
+if isinstance(content, list):
+    content = "".join(
+        block.get("text", "") if isinstance(block, dict) else str(block)
+        for block in content
+    )
+```
 
 ### Key Pattern: Context Formatting
 

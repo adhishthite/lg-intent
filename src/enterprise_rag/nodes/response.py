@@ -10,10 +10,14 @@ from langchain_openai import ChatOpenAI
 from enterprise_rag.config import settings
 from enterprise_rag.state import RAGState, Source
 
-# Initialize the response LLM
+# Initialize the response LLM (Azure OpenAI via v1 API)
 _response_llm = ChatOpenAI(
     model=settings.llm.RESPONSE_MODEL,
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
     temperature=settings.llm.RESPONSE_TEMPERATURE,
+    reasoning={"effort": settings.llm.RESPONSE_REASONING_EFFORT},
+    timeout=settings.llm.TIMEOUT_SECONDS,
 )
 
 
@@ -101,7 +105,14 @@ def draft_response(state: RAGState) -> dict:
                 }
             )
 
+    # Handle reasoning models that return content as list
+    content = response.content
+    if isinstance(content, list):
+        content = "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block) for block in content
+        )
+
     return {
-        "response": response.content,
+        "response": content,
         "sources": sources,
     }

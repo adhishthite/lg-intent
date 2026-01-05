@@ -41,8 +41,11 @@ graph TD;
 # Install dependencies
 make install
 
-# Set up environment
-echo "OPENAI_API_KEY=your-key-here" > .env
+# Set up environment (Azure OpenAI required)
+cat > .env << 'EOF'
+AZURE_OPENAI_ENDPOINT=https://your-instance.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-azure-key
+EOF
 
 # Run the demo
 make run
@@ -105,45 +108,44 @@ src/
 
 Create a `.env` file with the following variables:
 
-### Required
-
-| Variable               | Description              |
-| ---------------------- | ------------------------ |
-| `OPENAI_API_KEY`       | OpenAI API key           |
-
 ### LLM Settings
 
-| Variable               | Description              | Default      |
-| ---------------------- | ------------------------ | ------------ |
-| `CLASSIFIER_MODEL`     | Model for classification | gpt-4.1-nano |
-| `RESPONSE_MODEL`       | Model for response       | gpt-4.1-nano |
+| Variable                      | Description                        | Default    |
+| ----------------------------- | ---------------------------------- | ---------- |
+| `CLASSIFIER_MODEL`            | Model for classification           | gpt-5-nano |
+| `CLASSIFIER_REASONING_EFFORT` | Reasoning effort (low/medium/high) | low        |
+| `RESPONSE_MODEL`              | Model for response                 | gpt-5-nano |
+| `RESPONSE_REASONING_EFFORT`   | Reasoning effort (low/medium/high) | medium     |
+| `TIMEOUT_SECONDS`             | Request timeout                    | 90         |
 
 ### Elasticsearch (for production retrieval)
 
-| Variable               | Description                |
-| ---------------------- | -------------------------- |
-| `ELASTICSEARCH_URL`    | Elasticsearch cluster URL  |
-| `ELASTICSEARCH_API_KEY`| API key for authentication |
-| `WIKI_ES_VECTOR_INDEX` | Wiki embeddings index      |
-| `SNOW_ES_VECTOR_INDEX` | ServiceNow embeddings index|
-| `JIRA_ES_VECTOR_INDEX` | Jira embeddings index      |
-| `DOCS_ES_VECTOR_INDEX` | ES docs embeddings index   |
-| `ES_K`                 | Results per search (default: 5) |
+| Variable                | Description                     |
+| ----------------------- | ------------------------------- |
+| `ELASTICSEARCH_URL`     | Elasticsearch cluster URL       |
+| `ELASTICSEARCH_API_KEY` | API key for authentication      |
+| `WIKI_ES_VECTOR_INDEX`  | Wiki embeddings index           |
+| `SNOW_ES_VECTOR_INDEX`  | ServiceNow embeddings index     |
+| `JIRA_ES_VECTOR_INDEX`  | Jira embeddings index           |
+| `DOCS_ES_VECTOR_INDEX`  | ES docs embeddings index        |
+| `ES_K`                  | Results per search (default: 5) |
 
-### Azure OpenAI (optional)
+### Azure OpenAI (required)
 
-| Variable                  | Description              |
-| ------------------------- | ------------------------ |
-| `AZURE_OPENAI_ENDPOINT`   | Azure OpenAI service URL |
-| `AZURE_OPENAI_API_KEY`    | Azure OpenAI API key     |
+| Variable                | Description                                                                |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI service URL (e.g., `https://your-instance.openai.azure.com/`) |
+| `AZURE_OPENAI_API_KEY`  | Azure OpenAI API key                                                       |
+
+The system uses Azure OpenAI via the v1 API pattern (`/openai/v1/` endpoint) for full `ChatOpenAI` compatibility with reasoning models.
 
 ### LangSmith (observability)
 
-| Variable             | Description              |
-| -------------------- | ------------------------ |
-| `LANGSMITH_TRACING`  | Enable tracing (true/false) |
-| `LANGSMITH_API_KEY`  | LangSmith API key        |
-| `LANGSMITH_PROJECT`  | Project name for tracing |
+| Variable            | Description                 |
+| ------------------- | --------------------------- |
+| `LANGSMITH_TRACING` | Enable tracing (true/false) |
+| `LANGSMITH_API_KEY` | LangSmith API key           |
+| `LANGSMITH_PROJECT` | Project name for tracing    |
 
 See `src/enterprise_rag/CLAUDE.md` for full configuration reference.
 
