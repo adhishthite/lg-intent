@@ -7,11 +7,12 @@ Core package for the Enterprise RAG system.
 
 ## Module Overview
 
-| Module                        | Purpose                           |
-| ----------------------------- | --------------------------------- |
-| @src/enterprise_rag/state.py  | TypedDict schemas for graph state |
-| @src/enterprise_rag/config.py | Environment-based configuration   |
-| @src/enterprise_rag/graph.py  | LangGraph StateGraph wiring       |
+| Module                        | Purpose                                  |
+| ----------------------------- | ---------------------------------------- |
+| @src/enterprise_rag/state.py  | TypedDict schemas for graph state        |
+| @src/enterprise_rag/config.py | Environment-based configuration          |
+| @src/enterprise_rag/graph.py  | LangGraph StateGraph wiring              |
+| @src/enterprise_rag/search.py | Elasticsearch hybrid search (BM25 + kNN) |
 
 ## State Design
 
@@ -125,6 +126,60 @@ llm = ChatOpenAI(
 ```
 
 **Key pattern**: Appending `/openai/v1/` to Azure endpoint enables full `ChatOpenAI` compatibility, including reasoning models.
+
+## Elasticsearch Hybrid Search
+
+The search module in @src/enterprise_rag/search.py provides hybrid search (BM25 + vector with RRF fusion):
+
+```python
+from enterprise_rag.search import hybrid_search, close_clients
+
+# Perform hybrid search
+chunks = await hybrid_search(
+    index=settings.elasticsearch.WIKI_ES_VECTOR_INDEX,
+    query="How do I submit PTO?",
+    source_type="wiki",
+    k=5,  # Optional, defaults to ES_K setting
+)
+
+# Clean up on shutdown
+await close_clients()
+```
+
+### Search Strategy
+
+Uses ES 8.14+ retriever API for composing search:
+
+1. **BM25 text search** - matches on multiple fields with boosting:
+   - `page_content` (1x) - main content
+   - `metadata.title` (2x) - document titles
+   - `metadata.keywords` (1.5x) - extracted keywords
+   - `metadata.document_summary` (1x) - LLM-generated summaries
+2. **kNN vector search** - semantic similarity using embeddings
+3. **RRF fusion** - Reciprocal Rank Fusion merges both rankings
+
+### Embeddings
+
+Uses `OpenAIEmbeddings` from LangChain with Azure v1 API pattern (same as `ChatOpenAI`):
+
+```python
+from langchain_openai import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings(
+    model=settings.azure.EMBEDDING_DEPLOYMENT_NAME,
+    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
+    api_key=settings.azure.OPENAI_API_KEY,
+)
+```
+
+### Index Schema
+
+| Index                        | Docs   | Content Field  | Metadata Fields                           |
+| ---------------------------- | ------ | -------------- | ----------------------------------------- |
+| `elasticgpt-embeddings-wiki` | 7,383  | `page_content` | `title`, `url`, `space`, `keywords`       |
+| `elasticgpt-embeddings-docs` | 72,187 | `page_content` | `title`, `url`, `source_type`, `filename` |
+
+Both indices use 1536-dim embeddings (text-embedding-3-small).
 
 ## Async Execution
 
