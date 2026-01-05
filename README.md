@@ -67,12 +67,18 @@ QUERY: How do I submit a PTO request?
     - [wiki] Related Policies and Procedures (score: 0.78)
 
 [draft_response]
-  Response: To submit a PTO request, navigate to the portal...
+  Response:
+  How to submit a PTO request:
+  - Navigate to the portal
+  - Fill out the required form
+  - Submit for approval
 
-  Sources:
-    - [wiki] Internal Guide: PTO Request
-    - [servicenow] How To: Standard Process Guide
+  ## Sources
+  - [How To: Standard Process Guide](https://servicenow.example.com/kb/KB0001234)
+  - [Internal Guide: PTO Request](https://wiki.internal.example.com/article/123)
 ```
+
+Responses are formatted in markdown with clickable source links.
 
 ## Commands
 
@@ -158,9 +164,27 @@ To add a new data source:
 3. Update classifier prompt in `nodes/classifier.py`
 4. Register node in `graph.py`
 
+## Async Execution
+
+The system is fully async for FastAPI deployment:
+
+```python
+import asyncio
+from enterprise_rag import create_rag_graph
+
+async def main():
+    graph = create_rag_graph()
+    result = await graph.ainvoke({"query": "How do I submit PTO?"})
+    print(result["response"])
+
+asyncio.run(main())
+```
+
+All nodes and agents use `async def` with `await llm.ainvoke()` for non-blocking execution.
+
 ## Tech Stack
 
-- [LangGraph](https://langchain-ai.github.io/langgraph/) - Workflow orchestration
+- [LangGraph](https://langchain-ai.github.io/langgraph/) - Workflow orchestration (async)
 - [LangChain](https://python.langchain.com/) - LLM integration
-- [OpenAI](https://openai.com/) - Language models
+- [Azure OpenAI](https://azure.microsoft.com/en-us/products/ai-services/openai-service) - Language models
 - [uv](https://github.com/astral-sh/uv) - Package management

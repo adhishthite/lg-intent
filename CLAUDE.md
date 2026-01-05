@@ -58,7 +58,21 @@ User Query → classify_intent → [agent] → draft_response → Response
 
 ## Environment
 
-Requires `OPENAI_API_KEY` in `.env`.
+Requires Azure OpenAI credentials in `.env`:
+
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_API_KEY`
+
+## Async Implementation
+
+**All code must be async.** This system is designed for FastAPI deployment:
+
+- All nodes use `async def` and `await llm.ainvoke()`
+- All agents use `async def` (ready for async HTTP clients like httpx)
+- Graph invocation uses `.ainvoke()` or `.astream()`
+- Tests use `pytest-asyncio` with `@pytest.mark.asyncio`
+
+When adding new nodes or agents, always use `async def`.
 
 ## Extending
 

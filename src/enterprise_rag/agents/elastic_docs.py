@@ -66,7 +66,7 @@ def _mock_elastic_docs_search(query: str) -> list[RetrievedChunk]:
     ]
 
 
-def elastic_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
+async def elastic_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     Retrieve from Elasticsearch official documentation.
 
@@ -81,6 +81,7 @@ def elastic_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     query = state["query"]
 
+    # Mock is sync, production will use async HTTP
     chunks = _mock_elastic_docs_search(query)
 
     return Command(

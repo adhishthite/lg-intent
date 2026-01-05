@@ -59,7 +59,7 @@ def _mock_servicenow_search(query: str) -> list[RetrievedChunk]:
     ]
 
 
-def internal_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
+async def internal_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     Retrieve from internal documentation sources.
 
@@ -74,7 +74,7 @@ def internal_docs_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     query = state["query"]
 
-    # Search both sources
+    # Search both sources (mocks are sync, production will use async HTTP)
     wiki_chunks = _mock_wiki_search(query)
     servicenow_chunks = _mock_servicenow_search(query)
 

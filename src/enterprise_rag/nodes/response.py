@@ -34,16 +34,19 @@ RESPONSE_PROMPT = """You are a helpful enterprise assistant. Answer the user's q
 {context}
 
 ## Instructions
-- Answer the question directly and concisely
+- Answer the question directly and concisely using markdown formatting
 - Only use information from the provided context
 - If the context doesn't contain enough information, say so
 - Be professional and helpful
 - Do not make up information not present in the context
+- At the end of your response, add a "## Sources" section with markdown links to the sources you used
+- Format each source as: `- [Title](URL)`
+- Only include sources that you actually referenced in your answer
 
 ## Response"""
 
 
-def draft_response(state: RAGState) -> dict:
+async def draft_response(state: RAGState) -> dict:
     """
     Generate a response from retrieved chunks.
 
@@ -68,13 +71,13 @@ def draft_response(state: RAGState) -> dict:
             "sources": [],
         }
 
-    # Format chunks into context string
+    # Format chunks into context string (include URLs for markdown links)
     context_parts = []
     for i, chunk in enumerate(chunks, 1):
-        source_info = f"[{chunk['source_type']}]"
-        if chunk.get("title"):
-            source_info += f" {chunk['title']}"
-        context_parts.append(f"### Source {i} {source_info}\n{chunk['content']}")
+        title = chunk.get("title") or "Untitled"
+        url = chunk.get("source_url") or "No URL"
+        source_header = f"### Source {i}: {title}\n**URL**: {url}\n**Type**: {chunk['source_type']}"
+        context_parts.append(f"{source_header}\n\n{chunk['content']}")
 
     context = "\n\n".join(context_parts)
 
@@ -84,7 +87,7 @@ def draft_response(state: RAGState) -> dict:
         context=context,
     )
 
-    response = _response_llm.invoke([HumanMessage(content=prompt)])
+    response = await _response_llm.ainvoke([HumanMessage(content=prompt)])
 
     # Extract sources from chunks (deduplicated by title+url)
     seen_sources: set[tuple[str, str | None]] = set()

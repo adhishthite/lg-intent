@@ -125,3 +125,31 @@ llm = ChatOpenAI(
 ```
 
 **Key pattern**: Appending `/openai/v1/` to Azure endpoint enables full `ChatOpenAI` compatibility, including reasoning models.
+
+## Async Execution
+
+The system is fully async for FastAPI deployment readiness:
+
+```python
+import asyncio
+from enterprise_rag import create_rag_graph
+
+async def main():
+    graph = create_rag_graph()
+
+    # Async invocation
+    result = await graph.ainvoke({"query": "How do I submit PTO?"})
+
+    # Or async streaming
+    async for event in graph.astream(initial_state, stream_mode="updates"):
+        print(event)
+
+asyncio.run(main())
+```
+
+**Key points**:
+
+- All nodes (`classify_intent`, `draft_response`) use `async def` and `await llm.ainvoke()`
+- All agents use `async def` for future async HTTP client compatibility
+- Graph invocation uses `.ainvoke()` or `.astream()` (async variants)
+- LangGraph automatically detects async nodes and handles execution appropriately

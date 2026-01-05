@@ -4,11 +4,13 @@ Main entry point for Enterprise RAG.
 Demonstrates how to invoke the RAG graph with sample queries.
 """
 
+import asyncio
+
 from enterprise_rag import create_rag_graph
 from enterprise_rag.state import RAGState
 
 
-def run_query(graph, query: str) -> None:
+async def run_query(graph, query: str) -> None:
     """
     Run a single query through the RAG system.
 
@@ -30,8 +32,8 @@ def run_query(graph, query: str) -> None:
         "sources": [],
     }
 
-    # Stream execution to see each step
-    for event in graph.stream(initial_state, stream_mode="updates"):
+    # Stream execution to see each step (async)
+    async for event in graph.astream(initial_state, stream_mode="updates"):
         for node_name, updates in event.items():
             print(f"\n[{node_name}]")
 
@@ -68,7 +70,7 @@ def run_query(graph, query: str) -> None:
                     print(f"      {url}")
 
 
-def main():
+async def main():
     """Run example queries to demonstrate the RAG system."""
     print("Creating Enterprise RAG graph...")
     graph = create_rag_graph()
@@ -76,7 +78,7 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # Example 1: Internal documentation query
     # ─────────────────────────────────────────────────────────────────────────
-    run_query(
+    await run_query(
         graph,
         "How do I submit a PTO request?",
     )
@@ -84,7 +86,7 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # Example 2: Elasticsearch documentation query
     # ─────────────────────────────────────────────────────────────────────────
-    run_query(
+    await run_query(
         graph,
         "How do I create a bool query in Elasticsearch?",
     )
@@ -92,11 +94,11 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # Example 3: Jira query
     # ─────────────────────────────────────────────────────────────────────────
-    run_query(
+    await run_query(
         graph,
         "What's the status of the search feature bug?",
     )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

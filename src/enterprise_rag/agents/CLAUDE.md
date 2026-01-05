@@ -8,18 +8,21 @@ Retrieval agents for different data sources. Currently mocked - swap implementat
 
 All agents must:
 
-1. Accept `RAGState` as input (defined in @src/enterprise_rag/state.py)
-2. Return `Command[Literal["draft_response"]]`
-3. Populate `retrieved_chunks` with `list[RetrievedChunk]`
+1. Be async functions (`async def`)
+2. Accept `RAGState` as input (defined in @src/enterprise_rag/state.py)
+3. Return `Command[Literal["draft_response"]]`
+4. Populate `retrieved_chunks` with `list[RetrievedChunk]`
 
 ```python
-def my_agent(state: RAGState) -> Command[Literal["draft_response"]]:
-    chunks = retrieve_from_source(state["query"])
+async def my_agent(state: RAGState) -> Command[Literal["draft_response"]]:
+    chunks = await retrieve_from_source(state["query"])  # Use async HTTP clients
     return Command(
         update={"retrieved_chunks": chunks},
         goto="draft_response",
     )
 ```
+
+**Note**: The system is fully async for FastAPI deployment readiness. Mock functions are sync (no I/O), but production implementations should use async HTTP clients (httpx, aiohttp).
 
 ## RetrievedChunk Schema
 
@@ -48,33 +51,43 @@ Returns 3 chunks: 2 from wiki, 1 from ServiceNow.
 
 ### Production Implementation
 
-Replace `_mock_wiki_search` and `_mock_servicenow_search` with:
+Replace `_mock_wiki_search` and `_mock_servicenow_search` with async versions:
 
-**Wiki (Confluence example)**:
+**Wiki (Confluence example with httpx)**:
 
 ```python
-def _wiki_search(query: str) -> list[RetrievedChunk]:
-    # Use Confluence REST API or vector search
-    results = confluence_client.search(query)
-    return [
-        {
-            "content": r.body,
-            "source_type": "wiki",
-            "source_url": r.url,
-            "title": r.title,
-            "relevance_score": r.score,
-        }
-        for r in results
-    ]
+import httpx
+
+async def _wiki_search(query: str) -> list[RetrievedChunk]:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{CONFLUENCE_URL}/wiki/rest/api/search",
+            params={"cql": f'text ~ "{query}"'},
+            headers={"Authorization": f"Bearer {API_TOKEN}"},
+        )
+        results = response.json()["results"]
+        return [
+            {
+                "content": r["content"]["body"]["storage"]["value"],
+                "source_type": "wiki",
+                "source_url": r["_links"]["webui"],
+                "title": r["title"],
+                "relevance_score": r.get("score"),
+            }
+            for r in results
+        ]
 ```
 
 **ServiceNow**:
 
 ```python
-def _servicenow_search(query: str) -> list[RetrievedChunk]:
-    # Use ServiceNow Table API or Knowledge API
-    results = snow_client.search_kb(query)
-    return [...]
+async def _servicenow_search(query: str) -> list[RetrievedChunk]:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{SNOW_URL}/api/now/table/kb_knowledge",
+            params={"sysparm_query": f"short_descriptionLIKE{query}"},
+        )
+        return [...]
 ```
 
 ---
@@ -94,23 +107,25 @@ Returns 3 chunks with sample ES documentation content.
 #### **Option 1: Vector search over indexed docs**
 
 ```python
-def _elastic_docs_search(query: str) -> list[RetrievedChunk]:
-    # Embed query and search vector index
-    embedding = embed(query)
-    results = vector_db.search(embedding, collection="elastic_docs")
+async def _elastic_docs_search(query: str) -> list[RetrievedChunk]:
+    # Embed query and search vector index (async)
+    embedding = await embed_async(query)
+    results = await vector_db.asearch(embedding, collection="elastic_docs")
     return [...]
 ```
 
 #### **Option 2: Elastic site search API**
 
 ```python
-def _elastic_docs_search(query: str) -> list[RetrievedChunk]:
-    # Use Elastic's own search API
-    response = requests.get(
-        "https://www.elastic.co/search-api",
-        params={"q": query}
-    )
-    return [...]
+import httpx
+
+async def _elastic_docs_search(query: str) -> list[RetrievedChunk]:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.elastic.co/search-api",
+            params={"q": query}
+        )
+        return [...]
 ```
 
 ---
@@ -128,31 +143,41 @@ Returns 2 mock issues with status, assignee, and description.
 ### Production Implementation
 
 ```python
-def _jira_search(query: str) -> list[RetrievedChunk]:
-    # Use Jira REST API with JQL
+import httpx
+
+async def _jira_search(query: str) -> list[RetrievedChunk]:
     jql = f'text ~ "{query}" ORDER BY updated DESC'
-    issues = jira_client.search_issues(jql, maxResults=5)
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{JIRA_URL}/rest/api/2/search",
+            params={"jql": jql, "maxResults": 5},
+            headers={"Authorization": f"Bearer {JIRA_TOKEN}"},
+        )
+        issues = response.json()["issues"]
 
     return [
         {
-            "content": format_issue(issue),  # Format as markdown
+            "content": format_issue(issue),
             "source_type": "jira",
-            "source_url": f"https://jira.elastic.co/browse/{issue.key}",
-            "title": f"{issue.key}: {issue.fields.summary}",
-            "relevance_score": None,  # Jira doesn't provide scores
+            "source_url": f"{JIRA_URL}/browse/{issue['key']}",
+            "title": f"{issue['key']}: {issue['fields']['summary']}",
+            "relevance_score": None,
         }
         for issue in issues
     ]
 
-def format_issue(issue) -> str:
-    return f"""**{issue.key}**: {issue.fields.summary}
+def format_issue(issue: dict) -> str:
+    fields = issue["fields"]
+    assignee = fields.get("assignee")
+    return f"""**{issue['key']}**: {fields['summary']}
 
-**Status**: {issue.fields.status.name}
-**Assignee**: {issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned'}
-**Priority**: {issue.fields.priority.name}
+**Status**: {fields['status']['name']}
+**Assignee**: {assignee['displayName'] if assignee else 'Unassigned'}
+**Priority**: {fields['priority']['name']}
 
 **Description**:
-{issue.fields.description or 'No description'}
+{fields.get('description') or 'No description'}
 """
 ```
 

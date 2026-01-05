@@ -14,7 +14,7 @@ Classifies user queries into intent categories using structured LLM output.
 
 ### LLM Configuration
 
-Uses Azure OpenAI via v1 API with reasoning:
+Uses Azure OpenAI via v1 API with reasoning. All nodes are async:
 
 ```python
 _classifier_llm = ChatOpenAI(
@@ -24,6 +24,11 @@ _classifier_llm = ChatOpenAI(
     reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},  # "low"
     timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
 )
+
+# Node is async, uses ainvoke
+async def classify_intent(state: RAGState) -> Command[...]:
+    classification = await structured_llm.ainvoke(prompt)
+    ...
 ```
 
 ### Intent Weights
@@ -38,11 +43,11 @@ Categories have weights to bias classification when ambiguous:
 
 Jira has lower weight because users rarely check issue status via this system.
 
-### Key Pattern: Structured Output
+### Key Pattern: Async Structured Output
 
 ```python
 structured_llm = llm.with_structured_output(IntentClassification)
-classification = structured_llm.invoke(prompt)
+classification = await structured_llm.ainvoke(prompt)  # Async invocation
 ```
 
 This uses OpenAI function calling under the hood. The LLM is constrained to return JSON matching `IntentClassification` (defined in @src/enterprise_rag/state.py):
@@ -90,7 +95,7 @@ Generates final response from retrieved chunks with source citations.
 
 ### LLM Configuration
 
-Uses Azure OpenAI via v1 API with reasoning:
+Uses Azure OpenAI via v1 API with reasoning. All nodes are async:
 
 ```python
 _response_llm = ChatOpenAI(
@@ -100,6 +105,11 @@ _response_llm = ChatOpenAI(
     reasoning={"effort": settings.llm.RESPONSE_REASONING_EFFORT},  # "medium"
     timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
 )
+
+# Node is async, uses ainvoke
+async def draft_response(state: RAGState) -> dict:
+    response = await _response_llm.ainvoke([HumanMessage(content=prompt)])
+    ...
 ```
 
 ### Reasoning Model Content Handling
@@ -117,17 +127,39 @@ if isinstance(content, list):
 
 ### Key Pattern: Context Formatting
 
-Chunks are formatted on-demand inside the node:
+Chunks are formatted on-demand inside the node, including URLs for markdown linking:
 
 ```python
 for i, chunk in enumerate(chunks, 1):
-    source_info = f"[{chunk['source_type']}]"
-    if chunk.get("title"):
-        source_info += f" {chunk['title']}"
-    context_parts.append(f"### Source {i} {source_info}\n{chunk['content']}")
+    title = chunk.get("title") or "Untitled"
+    url = chunk.get("source_url") or "No URL"
+    source_header = f"### Source {i}: {title}\n**URL**: {url}\n**Type**: {chunk['source_type']}"
+    context_parts.append(f"{source_header}\n\n{chunk['content']}")
 ```
 
 This follows the principle: store raw data in state, format prompts inside nodes.
+
+### Markdown Response with Sources
+
+The response prompt instructs the LLM to:
+
+1. Format the answer using markdown
+2. Add a `## Sources` section at the end with markdown links
+
+Example output:
+
+```markdown
+Here's how to submit a PTO request:
+
+- Navigate to the portal
+- Fill out the required form
+- Submit for approval
+
+## Sources
+
+- [How To: Standard Process Guide](https://servicenow.example.com/kb/KB0001234)
+- [Internal Guide: PTO Request](https://wiki.internal.example.com/article/123)
+```
 
 ### Source Deduplication
 

@@ -51,7 +51,7 @@ User Query: {query}
 Classify this query and provide brief reasoning."""
 
 
-def classify_intent(
+async def classify_intent(
     state: RAGState,
 ) -> Command[Literal["internal_docs_agent", "elastic_docs_agent", "jira_agent"]]:
     """
@@ -72,8 +72,8 @@ def classify_intent(
     # Format the prompt with the user's query
     prompt = CLASSIFICATION_PROMPT.format(query=state["query"])
 
-    # Get classification
-    classification: IntentClassification = structured_llm.invoke(prompt)
+    # Get classification (async)
+    classification: IntentClassification = await structured_llm.ainvoke(prompt)
 
     # Route to the appropriate agent based on intent
     intent_to_agent = {

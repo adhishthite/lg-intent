@@ -51,7 +51,7 @@ def _mock_jira_search(query: str) -> list[RetrievedChunk]:
     ]
 
 
-def jira_agent(state: RAGState) -> Command[Literal["draft_response"]]:
+async def jira_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     Retrieve from Jira issue tracker.
 
@@ -66,6 +66,7 @@ def jira_agent(state: RAGState) -> Command[Literal["draft_response"]]:
     """
     query = state["query"]
 
+    # Mock is sync, production will use async HTTP
     chunks = _mock_jira_search(query)
 
     return Command(
