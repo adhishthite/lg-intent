@@ -1,87 +1,94 @@
 # nodes Package
 
-LLM-powered nodes for classification and response generation.
+LLM-powered nodes for orchestration and response generation.
 
 **Parent**: @src/enterprise_rag/CLAUDE.md
 
-## classifier.py
+## Overview
 
-See @src/enterprise_rag/nodes/classifier.py
+The tool-based architecture has three nodes:
+
+1. **orchestrator** - Decides which tools to call, executes them
+2. **reranker** - Cross-source reranks all tool results with Jina
+3. **draft_response** - Generates final response from reranked chunks
+
+---
+
+## orchestrator.py
+
+See @src/enterprise_rag/nodes/orchestrator.py
 
 ### Purpose
 
-Classifies user queries into intent categories using structured LLM output.
+Orchestrates tool calls based on user query. Uses LLM with bound tools to decide which searches to perform and with what focused queries.
 
 ### LLM Configuration
 
-Uses Azure OpenAI via v1 API with reasoning. All nodes are async:
-
 ```python
-_classifier_llm = ChatOpenAI(
+_orchestrator_llm = ChatOpenAI(
     model=settings.llm.CLASSIFIER_MODEL,  # gpt-5-nano
     base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
     api_key=settings.azure.OPENAI_API_KEY,
-    reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},  # "low"
-    timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
+    temperature=0.0,  # Deterministic tool selection
+    timeout=settings.llm.TIMEOUT_SECONDS,
 )
 
-# Node is async, uses ainvoke
-async def classify_intent(state: RAGState) -> Command[...]:
-    classification = await structured_llm.ainvoke(prompt)
-    ...
+_llm_with_tools = _orchestrator_llm.bind_tools(ALL_TOOLS)
 ```
 
-### Intent Weights
+### Behavior
 
-Categories have weights to bias classification when ambiguous:
+**For retrieval queries:**
 
-| Intent          | Weight | Description                                    |
-| --------------- | ------ | ---------------------------------------------- |
-| `internal_docs` | 1.0    | Default preference                             |
-| `elastic_docs`  | 1.0    | Default preference                             |
-| `jira`          | 0.5    | Only when explicitly asking about tickets/bugs |
+- LLM returns tool calls with focused queries
+- Tools execute in parallel via `asyncio.gather`
+- Results accumulated in `retrieved_chunks`
+- Returns `{"retrieved_chunks": all_chunks}`
 
-Jira has lower weight because users rarely check issue status via this system.
+**For general queries (greetings, chitchat):**
 
-### Key Pattern: Async Structured Output
+- LLM responds directly without calling tools
+- Returns `{"response": content, "sources": [], "final_chunks": [], "retrieved_chunks": []}`
+- Graph exits directly to END
+
+### System Prompt
+
+The orchestrator system prompt instructs the LLM to:
+
+1. Call appropriate tools with focused queries
+2. Decompose multi-topic questions into multiple tool calls
+3. Respond directly for conversational messages
+
+### Routing Function
 
 ```python
-structured_llm = llm.with_structured_output(IntentClassification)
-classification = await structured_llm.ainvoke(prompt)  # Async invocation
+def should_continue_after_orchestrator(state) -> Literal["reranker", "__end__"]:
+    if state.get("response"):  # General query - already answered
+        return "__end__"
+    return "reranker"  # Has chunks to rerank
 ```
 
-This uses OpenAI function calling under the hood. The LLM is constrained to return JSON matching `IntentClassification` (defined in @src/enterprise_rag/state.py):
+---
+
+## reranker.py
+
+See @src/enterprise_rag/nodes/reranker.py
+
+### Purpose
+
+Cross-source reranks chunks from all tool calls using Jina cross-encoder.
+
+### Pipeline
+
+1. Collect all chunks from `retrieved_chunks` (from tool calls)
+2. Rerank using Jina cross-encoder (`jina-reranker-v3`)
+3. Store top 8 results in `final_chunks`
+
+### Output
 
 ```python
-class IntentClassification(TypedDict):
-    intent: Literal["internal_docs", "elastic_docs", "jira"]
-    reasoning: str
+return {"final_chunks": reranked}
 ```
-
-### Routing Logic
-
-```python
-intent_to_agent = {
-    "internal_docs": "internal_docs_agent",
-    "elastic_docs": "elastic_docs_agent",
-    "jira": "jira_agent",
-}
-return Command(update={...}, goto=intent_to_agent[intent])
-```
-
-### Prompt Structure
-
-The classification prompt includes:
-
-1. Description of each intent category
-2. Example queries for each category
-3. The data sources each category uses
-
-To add a new intent category:
-
-1. Add to `IntentType` Literal in @src/enterprise_rag/state.py
-2. Add description and examples to `CLASSIFICATION_PROMPT` in @src/enterprise_rag/nodes/classifier.py
-3. Add routing entry in `intent_to_agent` dict
 
 ---
 
@@ -91,43 +98,21 @@ See @src/enterprise_rag/nodes/response.py
 
 ### Purpose
 
-Generates final response from retrieved chunks with source citations.
+Generates final response from reranked chunks with source citations.
 
 ### LLM Configuration
-
-Uses Azure OpenAI via v1 API with reasoning. All nodes are async:
 
 ```python
 _response_llm = ChatOpenAI(
     model=settings.llm.RESPONSE_MODEL,  # gpt-5-nano
-    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
-    api_key=settings.azure.OPENAI_API_KEY,
     reasoning={"effort": settings.llm.RESPONSE_REASONING_EFFORT},  # "medium"
-    timeout=settings.llm.TIMEOUT_SECONDS,  # 90s
-)
-
-# Node is async, uses ainvoke
-async def draft_response(state: RAGState) -> dict:
-    response = await _response_llm.ainvoke([HumanMessage(content=prompt)])
     ...
-```
-
-### Reasoning Model Content Handling
-
-Reasoning models return `content` as a list of blocks instead of a string:
-
-```python
-content = response.content
-if isinstance(content, list):
-    content = "".join(
-        block.get("text", "") if isinstance(block, dict) else str(block)
-        for block in content
-    )
+)
 ```
 
 ### Key Pattern: Context Formatting
 
-Chunks are formatted on-demand inside the node, including URLs for markdown linking:
+Chunks are formatted on-demand inside the node:
 
 ```python
 for i, chunk in enumerate(chunks, 1):
@@ -137,43 +122,11 @@ for i, chunk in enumerate(chunks, 1):
     context_parts.append(f"{source_header}\n\n{chunk['content']}")
 ```
 
-This follows the principle: store raw data in state, format prompts inside nodes.
-
-### Markdown Response with Sources
-
-The response prompt instructs the LLM to:
-
-1. Format the answer using markdown
-2. Add a `## Sources` section at the end with markdown links
-
-Example output:
-
-```markdown
-Here's how to submit a PTO request:
-
-- Navigate to the portal
-- Fill out the required form
-- Submit for approval
-
-## Sources
-
-- [How To: Standard Process Guide](https://servicenow.example.com/kb/KB0001234)
-- [Internal Guide: PTO Request](https://wiki.internal.example.com/article/123)
-```
-
-### Source Deduplication
+### Output
 
 ```python
-seen_sources: set[tuple[str, str | None]] = set()
-for chunk in chunks:
-    key = (title, url)
-    if key not in seen_sources:
-        seen_sources.add(key)
-        sources.append(...)
+return {
+    "response": content,
+    "sources": sources,  # Deduplicated by (title, url)
+}
 ```
-
-Multiple chunks can come from the same source (e.g., different sections of a wiki page). We deduplicate by `(title, url)` tuple.
-
-### Empty Chunks Handling
-
-If no chunks were retrieved, returns a graceful fallback message rather than failing.

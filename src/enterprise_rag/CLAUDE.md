@@ -3,7 +3,7 @@
 Core package for the Enterprise RAG system.
 
 **Parent**: @CLAUDE.md
-**Children**: @src/enterprise_rag/nodes/CLAUDE.md | @src/enterprise_rag/agents/CLAUDE.md
+**Children**: @src/enterprise_rag/nodes/CLAUDE.md | @src/enterprise_rag/tools/CLAUDE.md
 
 ## Module Overview
 
@@ -14,17 +14,16 @@ Core package for the Enterprise RAG system.
 | @src/enterprise_rag/graph.py  | LangGraph StateGraph wiring              |
 | @src/enterprise_rag/search.py | Elasticsearch hybrid search (BM25 + kNN) |
 
-## State Design
+## State Design (Tool-Based Architecture)
 
-The state schema in @src/enterprise_rag/state.py follows LangGraph best practices:
+The state schema in @src/enterprise_rag/state.py is simplified for tool-based orchestration:
 
 ```python
 class RAGState(TypedDict):
     query: str                              # Input - never mutated
-    intent: IntentType | None               # Set by classifier
-    classification_reasoning: str | None    # Set by classifier
-    retrieved_chunks: list[RetrievedChunk]  # Set by agents
-    response: str | None                    # Set by draft_response
+    retrieved_chunks: Annotated[list[RetrievedChunk], operator.add]  # From tools
+    final_chunks: list[RetrievedChunk]      # After reranking
+    response: str | None                    # Set by orchestrator or draft_response
     sources: list[Source]                   # Set by draft_response
 ```
 
@@ -33,29 +32,36 @@ class RAGState(TypedDict):
 - Store raw data, not formatted prompts
 - Each field has a clear owner (which node sets it)
 - Use `| None` for fields set during execution
-- Use empty lists `[]` as initial values for list fields
+- Use `operator.add` reducer for parallel tool accumulation
+
+**Note**: Intent classification fields (`intents`, `query_keywords`) were removed. Intent is now implicit in which tools the orchestrator calls.
 
 ## Graph Wiring
 
-In @src/enterprise_rag/graph.py, only 2 explicit edges are defined:
+In @src/enterprise_rag/graph.py:
 
 ```python
-workflow.add_edge(START, "classify_intent")
+workflow.add_edge(START, "orchestrator")
+workflow.add_conditional_edges(
+    "orchestrator",
+    should_continue_after_orchestrator,
+    {"reranker": "reranker", "__end__": END},
+)
+workflow.add_edge("reranker", "draft_response")
 workflow.add_edge("draft_response", END)
 ```
 
-All other routing uses Command-based patterns - nodes return `Command(update={...}, goto="next_node")`.
+Three nodes: `orchestrator` -> `reranker` -> `draft_response`
+
+General queries (greetings) exit directly from orchestrator without going through reranker.
 
 ## Type Aliases
 
 Defined in @src/enterprise_rag/state.py:
 
 ```python
-IntentType = Literal["internal_docs", "elastic_docs", "jira"]
 SourceType = Literal["wiki", "servicenow", "elastic_docs", "jira"]
 ```
-
-Using `Literal` instead of `Enum` for better LLM structured output compatibility.
 
 ## Configuration
 
@@ -71,19 +77,13 @@ settings.azure.OPENAI_ENDPOINT             # Azure service URL
 settings.azure.OPENAI_API_KEY              # Azure API key
 
 # LLM settings
-settings.llm.CLASSIFIER_MODEL              # "gpt-5-nano"
-settings.llm.CLASSIFIER_REASONING_EFFORT   # "low"
+settings.llm.CLASSIFIER_MODEL              # "gpt-5-nano" (used by orchestrator)
+settings.llm.RESPONSE_MODEL                # "gpt-5-nano"
 
 # Other nested access
 settings.elasticsearch.ELASTICSEARCH_URL
-settings.langsmith.PROJECT
+settings.jina.API_KEY
 ```
-
-### Key Design Decisions
-
-1. **`load_dotenv()` first** - Sets env vars for external SDKs (OpenAI, LangChain)
-2. **Nested `BaseSettings`** - Each group has its own `env_prefix` for automatic env var mapping
-3. **No duplication** - Config lives only in nested groups, not duplicated at top level
 
 ### Nested Config Groups
 
@@ -93,21 +93,17 @@ settings.langsmith.PROJECT
 | `elasticsearch` | -            | `settings.elasticsearch.ELASTICSEARCH_URL` |
 | `azure`         | `AZURE_`     | `settings.azure.OPENAI_ENDPOINT`           |
 | `langsmith`     | `LANGSMITH_` | `settings.langsmith.PROJECT`               |
-| `postgres`      | `POSTGRES_`  | `settings.postgres.DB_URI`                 |
-| `eval`          | `EVAL_`      | `settings.eval.AGENT_MODEL`                |
-| `retrieval`     | -            | `settings.retrieval.MAX_CHUNKS_PER_AGENT`  |
+| `retrieval`     | -            | `settings.retrieval.CANDIDATE_K`           |
+| `jina`          | `JINA_`      | `settings.jina.API_KEY`                    |
 
 ### LLM Settings
 
 | Setting                       | Default      | Description                       |
 | ----------------------------- | ------------ | --------------------------------- |
-| `CLASSIFIER_MODEL`            | `gpt-5-nano` | Model for intent classification   |
-| `CLASSIFIER_REASONING_EFFORT` | `low`        | Reasoning effort for classifier   |
+| `CLASSIFIER_MODEL`            | `gpt-5-nano` | Model for orchestrator + keywords |
 | `RESPONSE_MODEL`              | `gpt-5-nano` | Model for response generation     |
 | `RESPONSE_REASONING_EFFORT`   | `medium`     | Reasoning effort for responses    |
 | `TIMEOUT_SECONDS`             | `90`         | Request timeout for all LLM calls |
-
-See @src/enterprise_rag/config.py for all available settings.
 
 ## Azure OpenAI Integration
 
@@ -120,12 +116,11 @@ llm = ChatOpenAI(
     model=settings.llm.CLASSIFIER_MODEL,
     base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
     api_key=settings.azure.OPENAI_API_KEY,
-    reasoning={"effort": settings.llm.CLASSIFIER_REASONING_EFFORT},
     timeout=settings.llm.TIMEOUT_SECONDS,
 )
 ```
 
-**Key pattern**: Appending `/openai/v1/` to Azure endpoint enables full `ChatOpenAI` compatibility, including reasoning models.
+**Key pattern**: Appending `/openai/v1/` to Azure endpoint enables full `ChatOpenAI` compatibility.
 
 ## Elasticsearch Hybrid Search
 
@@ -139,37 +134,23 @@ chunks = await hybrid_search(
     index=settings.elasticsearch.WIKI_ES_VECTOR_INDEX,
     query="How do I submit PTO?",
     source_type="wiki",
-    k=5,  # Optional, defaults to ES_K setting
 )
 
 # Clean up on shutdown
 await close_clients()
 ```
 
-### Search Strategy
+### Two-Stage Retrieval Pipeline
 
-Uses ES 8.14+ retriever API for composing search:
+Tools use a **retrieve-then-rerank** pattern:
 
-1. **BM25 text search** - matches on multiple fields with boosting:
-   - `page_content` (1x) - main content
-   - `metadata.title` (2x) - document titles
-   - `metadata.keywords` (1.5x) - extracted keywords
-   - `metadata.document_summary` (1x) - LLM-generated summaries
-2. **kNN vector search** - semantic similarity using embeddings
-3. **RRF fusion** - Reciprocal Rank Fusion merges both rankings
+```text
+Stage 1: Candidate Generation (15 docs per source)
+├── hybrid_search (BM25 + kNN + RRF) ─┐
+└── keyword_search (parallel) ────────┴─→ merge_and_dedupe
 
-### Embeddings
-
-Uses `OpenAIEmbeddings` from LangChain with Azure v1 API pattern (same as `ChatOpenAI`):
-
-```python
-from langchain_openai import OpenAIEmbeddings
-
-embeddings = OpenAIEmbeddings(
-    model=settings.azure.EMBEDDING_DEPLOYMENT_NAME,
-    base_url=settings.azure.OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
-    api_key=settings.azure.OPENAI_API_KEY,
-)
+Stage 2: Reranking (top 8)
+└── rerank_chunks (Jina cross-encoder in reranker node)
 ```
 
 ### Index Schema
@@ -204,7 +185,6 @@ asyncio.run(main())
 
 **Key points**:
 
-- All nodes (`classify_intent`, `draft_response`) use `async def` and `await llm.ainvoke()`
-- All agents use `async def` for future async HTTP client compatibility
-- Graph invocation uses `.ainvoke()` or `.astream()` (async variants)
-- LangGraph automatically detects async nodes and handles execution appropriately
+- All nodes (`orchestrator`, `reranker`, `draft_response`) use `async def`
+- All tools use `async def`
+- Graph invocation uses `.ainvoke()` or `.astream()`

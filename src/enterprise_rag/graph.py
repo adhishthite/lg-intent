@@ -1,13 +1,18 @@
 """
 LangGraph workflow for Enterprise RAG.
 
-This module wires together all nodes and agents into a compiled graph.
+This module wires together all nodes into a compiled graph.
+Uses tool-based architecture where the orchestrator decides which tools to call.
 """
 
 from langgraph.graph import END, START, StateGraph
 
-from enterprise_rag.agents import elastic_docs_agent, internal_docs_agent, jira_agent
-from enterprise_rag.nodes import classify_intent, draft_response
+from enterprise_rag.nodes import (
+    draft_response,
+    orchestrator,
+    reranker,
+    should_continue_after_orchestrator,
+)
 from enterprise_rag.state import RAGState
 
 
@@ -15,71 +20,90 @@ def create_rag_graph():
     """
     Create and compile the Enterprise RAG graph.
 
-    Graph Structure:
+    Graph Structure (Tool-Based):
+    =============================
+
+                        START
+                          |
+                          v
+                    orchestrator
+                    (LLM + tools)
+                          |
+              (conditional edge)
+                   /          \\
+                  v            v
+           [has chunks]   [no chunks = general]
+                  |            |
+                  v            v
+              reranker        END
+                  |       (general response
+                  v        already set)
+           draft_response
+                  |
+                  v
+                 END
+
+    Tool Execution:
+    ===============
+    - Orchestrator LLM decides which tools to call with focused queries
+    - Tool calls execute in parallel within orchestrator node
+    - Results accumulated in retrieved_chunks
+    - Reranker runs cross-source Jina reranking
+    - draft_response generates final answer
+
+    General Queries:
     ================
-
-        START
-          |
-          v
-    classify_intent -----> Routes via Command based on intent
-          |
-          +---> internal_docs_agent (wiki + servicenow)
-          |
-          +---> elastic_docs_agent (ES docs)
-          |
-          +---> jira_agent (issue tracker)
-          |
-          v
-    draft_response -----> Generates answer from retrieved chunks
-          |
-          v
-         END
-
-    Routing:
-    ========
-    - classify_intent uses Command to route to the appropriate agent
-    - All agents use Command to route to draft_response
-    - Only explicit edges are START->classify_intent and draft_response->END
+    - If user sends greeting/chitchat, orchestrator responds directly
+    - No tools are called, response is set immediately
+    - Graph exits without going through reranker/draft_response
 
     Returns:
-        Compiled LangGraph that can be invoked with .invoke() or .stream()
+        Compiled LangGraph that can be invoked with .ainvoke() or .astream()
     """
     # Create the graph with our state schema
     workflow = StateGraph(RAGState)
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # ADD NODES
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
-    # Intent classification - determines which agent to use
-    workflow.add_node("classify_intent", classify_intent)
+    # Orchestrator - decides which tools to call, executes them
+    workflow.add_node("orchestrator", orchestrator)
 
-    # Retrieval agents - each searches their respective data sources
-    workflow.add_node("internal_docs_agent", internal_docs_agent)
-    workflow.add_node("elastic_docs_agent", elastic_docs_agent)
-    workflow.add_node("jira_agent", jira_agent)
+    # Cross-source reranking - Jina reranks chunks from all tools
+    workflow.add_node("reranker", reranker)
 
-    # Response generation - synthesizes answer from retrieved chunks
+    # Response generation - synthesizes answer from reranked chunks
     workflow.add_node("draft_response", draft_response)
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # ADD EDGES
-    # ─────────────────────────────────────────────────────────────────────────
-    # Only essential edges - nodes handle conditional routing via Command
+    # -------------------------------------------------------------------------
 
     # Entry point
-    workflow.add_edge(START, "classify_intent")
+    workflow.add_edge(START, "orchestrator")
+
+    # Conditional edge after orchestrator
+    # - If response is set (general query): go to END
+    # - If retrieved_chunks has content: go to reranker
+    workflow.add_conditional_edges(
+        "orchestrator",
+        should_continue_after_orchestrator,
+        {
+            "reranker": "reranker",
+            "__end__": END,
+        },
+    )
+
+    # Reranker to response generation
+    workflow.add_edge("reranker", "draft_response")
 
     # Exit point
     workflow.add_edge("draft_response", END)
 
-    # NOTE: All other routing is handled by Command objects:
-    # - classify_intent routes to one of the three agents
-    # - Each agent routes to draft_response
-
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
     # COMPILE
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
 
     return workflow.compile()
 

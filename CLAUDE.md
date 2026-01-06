@@ -9,71 +9,106 @@ This repo uses **hierarchical CLAUDE.md files**:
 - @CLAUDE.md - This file (high-level)
 - @src/enterprise_rag/CLAUDE.md - Package details (state, config, graph)
 - @src/enterprise_rag/nodes/CLAUDE.md - Node implementations
-- @src/enterprise_rag/agents/CLAUDE.md - Agent implementations
+- @src/enterprise_rag/tools/CLAUDE.md - Tool implementations
 
 **Important**: After making code changes, spin up a subagent to update the relevant CLAUDE.md files. If a subdirectory does not have a CLAUDE.md, create one for that directory. Keep documentation in sync with implementation.
 
 ## Project Overview
 
-Enterprise RAG system with intent-based routing. Classifies user queries and routes to specialized retrieval agents.
+Enterprise RAG system with tool-based orchestration. An orchestrator LLM decides which tools to call and with what queries, naturally decomposing multi-intent queries into focused tool calls.
 
 ## Quick Reference
 
 ```bash
-make install       # Install dependencies
-make check         # Format + lint
-make test          # Run tests (8 tests)
-make run           # Run demo
-make graph-ascii   # Print graph
+make install                  # Install dependencies
+make check                    # Format + lint
+make test                     # Run tests (9 tests)
+make run                      # Run demo queries
+make run QUERY="your query"   # Run a custom query
+make graph-ascii              # Print graph
 ```
 
 ## Architecture
 
-```bash
-User Query → classify_intent → [agent] → draft_response → Response
-                    ↓
+```text
+User Query → orchestrator (LLM + tools) → reranker → draft_response
+                    |
          ┌─────────┼─────────┐
          ↓         ↓         ↓
-   internal    elastic     jira
-     docs       docs
+   search_internal  search_elastic  search_jira
+      docs             docs           (tools)
+         |             |              |
+         └─────────────┴──────────────┘
+                       ↓
+              retrieved_chunks
+                       ↓
+                   reranker
+                       ↓
+                draft_response
 ```
 
-**Three intent categories**:
+**Tool-based routing**:
 
-- `internal_docs` - Wiki + ServiceNow
-- `elastic_docs` - Elasticsearch documentation
-- `jira` - Issue tracker
+- Orchestrator LLM decides which tools to call based on query
+- Multi-intent queries decomposed into focused tool calls
+- Tools execute in parallel within orchestrator node
+- General queries (greetings) handled directly without tools
+
+**Three search tools**:
+
+- `search_internal_docs` - Wiki + ServiceNow
+- `search_elastic_docs` - Elasticsearch documentation
+- `search_jira` - Issue tracker
+
+**Multi-intent example**: "What's the PTO policy and how do I set up Elasticsearch?" causes orchestrator to call:
+
+- `search_internal_docs("PTO policy")`
+- `search_elastic_docs("Elasticsearch setup")`
+
+Each tool gets a focused query, avoiding search pollution.
 
 ## Key Files
 
-| File                                        | Purpose                  |
-| ------------------------------------------- | ------------------------ |
-| @src/enterprise_rag/state.py                | State schemas            |
-| @src/enterprise_rag/graph.py                | LangGraph wiring         |
-| @src/enterprise_rag/nodes/classifier.py     | Intent classification    |
-| @src/enterprise_rag/nodes/response.py       | Response generation      |
-| @src/enterprise_rag/agents/internal_docs.py | Internal docs agent      |
-| @src/enterprise_rag/agents/elastic_docs.py  | Elasticsearch docs agent |
-| @src/enterprise_rag/agents/jira.py          | Jira agent               |
+| File                                        | Purpose                        |
+| ------------------------------------------- | ------------------------------ |
+| @src/enterprise_rag/state.py                | State schemas                  |
+| @src/enterprise_rag/graph.py                | LangGraph wiring               |
+| @src/enterprise_rag/search.py               | ES hybrid search + Jina rerank |
+| @src/enterprise_rag/nodes/orchestrator.py   | LLM + tool orchestration       |
+| @src/enterprise_rag/nodes/reranker.py       | Cross-source reranking         |
+| @src/enterprise_rag/nodes/response.py       | Response generation            |
+| `@src/enterprise_rag/tools/__init__.py`     | Search tools                   |
 
 ## Environment
 
-Requires Azure OpenAI credentials in `.env`:
+Requires credentials in `.env`:
+
+**Azure OpenAI** (embeddings and LLM):
 
 - `AZURE_OPENAI_ENDPOINT`
 - `AZURE_OPENAI_API_KEY`
+- `AZURE_EMBEDDING_DEPLOYMENT_NAME`
+
+**Jina AI** (reranking):
+
+- `JINA_API_KEY`
+
+**Elasticsearch**:
+
+- `ELASTICSEARCH_URL`
+- `ELASTICSEARCH_API_KEY`
 
 ## Async Implementation
 
 **All code must be async.** This system is designed for FastAPI deployment:
 
 - All nodes use `async def` and `await llm.ainvoke()`
-- All agents use `async def` (ready for async HTTP clients like httpx)
+- All tools use `async def`
 - Graph invocation uses `.ainvoke()` or `.astream()`
 - Tests use `pytest-asyncio` with `@pytest.mark.asyncio`
 
-When adding new nodes or agents, always use `async def`.
+When adding new nodes or tools, always use `async def`.
 
 ## Extending
 
-To add a new data source, see @src/enterprise_rag/agents/CLAUDE.md for the agent contract and production implementation patterns.
+To add a new data source, see @src/enterprise_rag/tools/CLAUDE.md for the tool contract and implementation patterns.

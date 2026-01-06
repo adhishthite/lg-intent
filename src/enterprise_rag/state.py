@@ -3,17 +3,19 @@ State schemas for Enterprise RAG system.
 
 This module defines the TypedDict schemas that flow through the LangGraph workflow.
 Following the principle: store raw data, not formatted prompts.
+
+Updated for tool-based architecture - intent classification is now implicit
+in the orchestrator's tool selection.
 """
 
-from typing import Literal
+import operator
+from typing import Annotated, Literal
 
 from typing_extensions import TypedDict
 
 # =============================================================================
-# Intent Types
+# Type Aliases
 # =============================================================================
-
-IntentType = Literal["internal_docs", "elastic_docs", "jira"]
 
 # Source types for retrieved chunks
 SourceType = Literal["wiki", "servicenow", "elastic_docs", "jira"]
@@ -28,7 +30,7 @@ class RetrievedChunk(TypedDict):
     """
     A single piece of retrieved context from any data source.
 
-    This is the standard format that all agents return. Each agent
+    This is the standard format that all tools return. Each tool
     populates these fields based on their source system.
     """
 
@@ -62,32 +64,13 @@ class Source(TypedDict):
 
 
 # =============================================================================
-# Classification Schema
-# =============================================================================
-
-
-class IntentClassification(TypedDict):
-    """
-    Structured output from the intent classifier.
-
-    Used with llm.with_structured_output() to get reliable classification.
-    """
-
-    # The classified intent - determines which agent handles the query
-    intent: IntentType
-
-    # Brief reasoning for the classification (useful for debugging)
-    reasoning: str
-
-
-# =============================================================================
 # Main State Schema
 # =============================================================================
 
 
 class RAGState(TypedDict):
     """
-    The main state schema for the Enterprise RAG workflow.
+    The main state schema for the Enterprise RAG workflow (tool-based architecture).
 
     This TypedDict flows between all nodes in the graph. Each node
     reads what it needs and returns updates to specific fields.
@@ -96,36 +79,39 @@ class RAGState(TypedDict):
     - Store raw data, not formatted prompts
     - Each field has a clear owner (which node sets it)
     - Optional fields use | None pattern
+    - Use Annotated with operator.add for accumulation
+
+    Note: Intent classification fields (intents, classification_reasoning,
+    query_keywords) have been removed. In the tool-based architecture,
+    intent is implicit in the orchestrator's tool selection.
     """
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # INPUT (set at invocation, read by multiple nodes)
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
+    # INPUT (set at invocation)
+    # -------------------------------------------------------------------------
 
     # The user's natural language query
     query: str
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # CLASSIFICATION (set by classify_intent node)
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
+    # RETRIEVAL (set by orchestrator via tool calls)
+    # -------------------------------------------------------------------------
 
-    # The classified intent - determines routing
-    intent: IntentType | None
+    # Chunks retrieved by tools - accumulated from all tool calls
+    # Uses operator.add reducer for accumulation
+    retrieved_chunks: Annotated[list[RetrievedChunk], operator.add]
 
-    # Reasoning from the classifier (for debugging/logging)
-    classification_reasoning: str | None
+    # -------------------------------------------------------------------------
+    # RERANKING (set by reranker node)
+    # -------------------------------------------------------------------------
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # RETRIEVAL (set by agent nodes)
-    # ─────────────────────────────────────────────────────────────────────────
+    # Final chunks after cross-source Jina reranking
+    # Separate field because we can't "reset" a reducer field
+    final_chunks: list[RetrievedChunk]
 
-    # Chunks retrieved by the selected agent
-    # This is a list that the agent populates
-    retrieved_chunks: list[RetrievedChunk]
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # OUTPUT (set by draft_response node)
-    # ─────────────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------------
+    # OUTPUT (set by draft_response or orchestrator for general queries)
+    # -------------------------------------------------------------------------
 
     # The generated response to the user
     response: str | None

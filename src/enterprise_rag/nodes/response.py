@@ -48,20 +48,21 @@ RESPONSE_PROMPT = """You are a helpful enterprise assistant. Answer the user's q
 
 async def draft_response(state: RAGState) -> dict:
     """
-    Generate a response from retrieved chunks.
+    Generate a response from reranked chunks.
 
     This node:
-    1. Formats retrieved chunks into context
+    1. Formats final_chunks (post-reranking) into context
     2. Generates a response using the LLM
     3. Extracts source citations from the chunks
 
     Args:
-        state: Current RAG state with retrieved_chunks populated
+        state: Current RAG state with final_chunks populated by reranker
 
     Returns:
         Dict with response and sources updates
     """
-    chunks = state["retrieved_chunks"]
+    # Use final_chunks (post-reranking) instead of retrieved_chunks
+    chunks = state.get("final_chunks", [])
 
     # Handle case where no chunks were retrieved
     if not chunks:

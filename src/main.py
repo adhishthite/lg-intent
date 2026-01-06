@@ -1,12 +1,18 @@
 """
 Main entry point for Enterprise RAG.
 
-Demonstrates how to invoke the RAG graph with sample queries.
+Run with a custom query:
+    python src/main.py "What's the PTO policy?"
+
+Or run demo queries:
+    python src/main.py
 """
 
 import asyncio
+import sys
 
 from enterprise_rag import create_rag_graph
+from enterprise_rag.search import close_clients
 from enterprise_rag.state import RAGState
 
 
@@ -22,12 +28,11 @@ async def run_query(graph, query: str) -> None:
     print(f"QUERY: {query}")
     print(f"{'=' * 70}")
 
-    # Initialize state with query and empty collections
+    # Initialize state with query (simplified for tool-based architecture)
     initial_state: RAGState = {
         "query": query,
-        "intent": None,
-        "classification_reasoning": None,
         "retrieved_chunks": [],
+        "final_chunks": [],
         "response": None,
         "sources": [],
     }
@@ -37,21 +42,33 @@ async def run_query(graph, query: str) -> None:
         for node_name, updates in event.items():
             print(f"\n[{node_name}]")
 
-            # Show classification info
-            if updates and updates.get("intent"):
-                print(f"  Intent: {updates['intent']}")
-                if updates.get("classification_reasoning"):
-                    print(f"  Reasoning: {updates['classification_reasoning']}")
-
-            # Show retrieved chunks count
+            # Show retrieved chunks count (from tool calls)
             if updates and updates.get("retrieved_chunks"):
                 chunks = updates["retrieved_chunks"]
-                print(f"  Retrieved {len(chunks)} chunks:")
+                print(f"  Retrieved {len(chunks)} chunks from tools")
+
+                # Show source distribution
+                source_counts: dict[str, int] = {}
                 for chunk in chunks:
+                    source = chunk.get("source_type", "unknown")
+                    source_counts[source] = source_counts.get(source, 0) + 1
+                if source_counts:
+                    dist = ", ".join(f"{k}: {v}" for k, v in source_counts.items())
+                    print(f"  Source distribution: {dist}")
+
+            # Show final chunks (post-rerank)
+            if updates and updates.get("final_chunks"):
+                chunks = updates["final_chunks"]
+                print(f"  Reranked to {len(chunks)} final chunks:")
+                for chunk in chunks[:5]:  # Show top 5
                     score = chunk.get("relevance_score", "N/A")
+                    if isinstance(score, float):
+                        score = f"{score:.3f}"
                     print(
-                        f"    - [{chunk['source_type']}] {chunk.get('title', 'Untitled')} (score: {score})"
+                        f"    - [{chunk['source_type']}] {chunk.get('title', 'Untitled')[:40]} (score: {score})"
                     )
+                if len(chunks) > 5:
+                    print(f"    ... and {len(chunks) - 5} more")
 
             # Show response
             if updates and updates.get("response"):
@@ -71,33 +88,39 @@ async def run_query(graph, query: str) -> None:
 
 
 async def main():
-    """Run example queries to demonstrate the RAG system."""
-    print("Creating Enterprise RAG graph...")
+    """
+    Run the RAG system.
+
+    If a query is provided as CLI argument, run that query.
+    Otherwise, run example demo queries.
+    """
+    print("Creating Enterprise RAG graph (tool-based)...")
     graph = create_rag_graph()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Example 1: Internal documentation query
-    # ─────────────────────────────────────────────────────────────────────────
-    await run_query(
-        graph,
-        "How do I submit a PTO request?",
-    )
+    try:
+        # Check for CLI argument
+        if len(sys.argv) > 1:
+            # Run user-provided query
+            query = " ".join(sys.argv[1:])
+            await run_query(graph, query)
+        else:
+            # Run demo queries showing different scenarios
+            demo_queries = [
+                # General query - no tools called
+                "Hello!",
+                # Single tool - internal docs
+                "How do I submit a PTO request?",
+                # Single tool - elastic docs
+                "How do I create a bool query in Elasticsearch?",
+                # Multi-tool - both internal and elastic docs
+                "What's the PTO policy and how do I create an index?",
+            ]
+            for query in demo_queries:
+                await run_query(graph, query)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Example 2: Elasticsearch documentation query
-    # ─────────────────────────────────────────────────────────────────────────
-    await run_query(
-        graph,
-        "How do I create a bool query in Elasticsearch?",
-    )
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Example 3: Jira query
-    # ─────────────────────────────────────────────────────────────────────────
-    await run_query(
-        graph,
-        "What's the status of the search feature bug?",
-    )
+    finally:
+        # Clean up ES and embedding clients
+        await close_clients()
 
 
 if __name__ == "__main__":

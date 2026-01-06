@@ -79,7 +79,7 @@ class LLMConfig(BaseSettings):
     CLASSIFIER_REASONING_EFFORT: str = "low"
     RESPONSE_MODEL: str = "gpt-5-nano"
     RESPONSE_TEMPERATURE: float = 0.3
-    RESPONSE_REASONING_EFFORT: str = "medium"
+    RESPONSE_REASONING_EFFORT: str = "low"
     TIMEOUT_SECONDS: int = 90
 
 
@@ -92,11 +92,25 @@ class EvalConfig(BaseSettings):
     JUDGE_MODEL: str = "gemini-3-flash-preview"
 
 
+class JinaConfig(BaseSettings):
+    """Jina AI settings for reranking."""
+
+    model_config = SettingsConfigDict(env_prefix="JINA_", extra="ignore")
+
+    API_KEY: str = ""
+    RERANK_MODEL: str = "jina-reranker-v3"
+    RERANK_TOP_N: int = 8  # Final output after reranking
+
+
 class RetrievalConfig(BaseSettings):
     """Retrieval settings."""
 
     model_config = SettingsConfigDict(extra="ignore")
 
+    # Candidate retrieval (before reranking)
+    CANDIDATE_K: int = 15  # Retrieve per source, rerank to few
+
+    # Legacy (kept for compatibility)
     MAX_CHUNKS_PER_AGENT: int = 5
     MIN_RELEVANCE_SCORE: float = 0.5
 
@@ -143,6 +157,7 @@ class Settings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     eval: EvalConfig = Field(default_factory=EvalConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    jina: JinaConfig = Field(default_factory=JinaConfig)
 
 
 # Global settings instance

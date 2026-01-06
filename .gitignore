@@ -322,3 +322,6 @@ results/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+
+.codex/
+AGENTS.md
